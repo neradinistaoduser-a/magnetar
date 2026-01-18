@@ -1,8 +1,11 @@
 package services
 
 import (
+	"context"
+
 	"github.com/c12s/magnetar/internal/domain"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 )
 
 type RegistrationService struct {
@@ -15,18 +18,23 @@ func NewRegistrationService(nodeRepo domain.NodeRepo) (*RegistrationService, err
 	}, nil
 }
 
-func (r *RegistrationService) Register(req domain.RegistrationReq) (*domain.RegistrationResp, error) {
+func (r *RegistrationService) Register(ctx context.Context, req domain.RegistrationReq) (*domain.RegistrationResp, error) {
+	tracer := otel.Tracer("magnetar.RegistrationService")
+	ctx, span := tracer.Start(ctx, "Register")
+	defer span.End()
+
 	node := domain.Node{
 		Id: domain.NodeId{
 			Value: generateNodeId(),
 		},
-		Labels:    req.Labels,
-		Resources: req.Resources,
+		Labels:      req.Labels,
+		Resources:   req.Resources,
 		BindAddress: req.BindAddress,
 	}
 
-	err := r.nodeRepo.Put(node)
+	err := r.nodeRepo.Put(ctx, node)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 

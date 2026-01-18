@@ -10,6 +10,7 @@ import (
 	"github.com/c12s/magnetar/internal/domain"
 	"github.com/juliangruber/go-intersect"
 	etcd "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slices"
 )
 
@@ -27,33 +28,42 @@ type nodeEtcdRepo struct {
 	labelMarshaller domain.LabelMarshaller
 }
 
-func NewNodeEtcdRepo(etcd *etcd.Client, nodeMarshaller domain.NodeMarshaller, labelMarshaller domain.LabelMarshaller) (domain.NodeRepo, error) {
+func NewNodeEtcdRepo(cli *etcd.Client, nodeMarshaller domain.NodeMarshaller, labelMarshaller domain.LabelMarshaller) (domain.NodeRepo, error) {
 	return &nodeEtcdRepo{
-		etcd:            etcd,
+		etcd:            cli,
 		nodeMarshaller:  nodeMarshaller,
 		labelMarshaller: labelMarshaller,
 	}, nil
 }
 
-func (n nodeEtcdRepo) Put(node domain.Node) error {
-	err := n.putNodeGetModel(node)
+func (n nodeEtcdRepo) Put(ctx context.Context, node domain.Node) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.Put")
+	defer span.End()
+	err := n.putNodeGetModel(ctx, node)
 	if err != nil {
 		return err
 	}
-	return n.putNodeQueryModel(node)
+	return n.putNodeQueryModel(ctx, node)
 }
 
-func (n nodeEtcdRepo) Delete(node domain.Node) error {
-	err := n.deleteNodeGetModel(node)
+func (n nodeEtcdRepo) Delete(ctx context.Context, node domain.Node) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.Delete")
+	defer span.End()
+	err := n.deleteNodeGetModel(ctx, node)
 	if err != nil {
 		return err
 	}
-	return n.deleteNodeQueryModel(node)
+	return n.deleteNodeQueryModel(ctx, node)
 }
 
-func (n nodeEtcdRepo) Get(nodeId domain.NodeId, org string) (*domain.Node, error) {
+func (n nodeEtcdRepo) Get(ctx context.Context, nodeId domain.NodeId, org string) (*domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.Get")
+	defer span.End()
 	key := getKey(domain.Node{Id: nodeId, Org: org})
-	resp, err := n.etcd.Get(context.TODO(), key)
+	resp, err := n.etcd.Get(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -63,32 +73,44 @@ func (n nodeEtcdRepo) Get(nodeId domain.NodeId, org string) (*domain.Node, error
 	return n.nodeMarshaller.Unmarshal(resp.Kvs[0].Value)
 }
 
-func (n nodeEtcdRepo) ListNodePool() ([]domain.Node, error) {
+func (n nodeEtcdRepo) ListNodePool(ctx context.Context) ([]domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.ListNodePool")
+	defer span.End()
 	keyPrefix := fmt.Sprintf("%s/pool", getKeyPrefix)
-	return n.listNodes(keyPrefix)
+	return n.listNodes(ctx, keyPrefix)
 }
 
-func (n nodeEtcdRepo) ListOrgOwnedNodes(org string) ([]domain.Node, error) {
+func (n nodeEtcdRepo) ListOrgOwnedNodes(ctx context.Context, org string) ([]domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.ListOrgOwnedNodes")
+	defer span.End()
 	keyPrefix := fmt.Sprintf("%s/orgs/%s", getKeyPrefix, org)
-	return n.listNodes(keyPrefix)
+	return n.listNodes(ctx, keyPrefix)
 }
 
-func (n nodeEtcdRepo) ListAllNodes() ([]domain.Node, error) {
-	return n.listNodes(getKeyPrefix)
+func (n nodeEtcdRepo) ListAllNodes(ctx context.Context) ([]domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.ListAllNodes")
+	defer span.End()
+	return n.listNodes(ctx, getKeyPrefix)
 }
 
-func (n nodeEtcdRepo) QueryNodePool(query domain.Query) ([]domain.Node, error) {
+func (n nodeEtcdRepo) QueryNodePool(ctx context.Context, query domain.Query) ([]domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.QueryNodePool")
+	defer span.End()
 	keyPrefix := fmt.Sprintf("%s/pool", queryKeyPrefix)
 	if len(query) == 0 {
-		return n.listNodes(keyPrefix)
+		return n.listNodes(ctx, keyPrefix)
 	}
-	nodeIds, err := n.queryNodes(query, keyPrefix)
+	nodeIds, err := n.queryNodes(ctx, query, keyPrefix)
 	if err != nil {
 		return nil, err
 	}
 	nodes := make([]domain.Node, 0)
 	for _, nodeId := range nodeIds {
-		node, err := n.Get(nodeId, "")
+		node, err := n.Get(ctx, nodeId, "")
 		if err != nil {
 			log.Println(err)
 			continue
@@ -98,18 +120,21 @@ func (n nodeEtcdRepo) QueryNodePool(query domain.Query) ([]domain.Node, error) {
 	return nodes, nil
 }
 
-func (n nodeEtcdRepo) QueryOrgOwnedNodes(query domain.Query, org string) ([]domain.Node, error) {
+func (n nodeEtcdRepo) QueryOrgOwnedNodes(ctx context.Context, query domain.Query, org string) ([]domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.QueryOrgOwnedNodes")
+	defer span.End()
 	keyPrefix := fmt.Sprintf("%s/orgs/%s", queryKeyPrefix, org)
 	if len(query) == 0 {
-		return n.ListOrgOwnedNodes(org)
+		return n.ListOrgOwnedNodes(ctx, org)
 	}
-	nodeIds, err := n.queryNodes(query, keyPrefix)
+	nodeIds, err := n.queryNodes(ctx, query, keyPrefix)
 	if err != nil {
 		return nil, err
 	}
 	nodes := make([]domain.Node, 0)
 	for _, nodeId := range nodeIds {
-		node, err := n.Get(nodeId, org)
+		node, err := n.Get(ctx, nodeId, org)
 		if err != nil {
 			log.Println(err)
 			continue
@@ -119,9 +144,12 @@ func (n nodeEtcdRepo) QueryOrgOwnedNodes(query domain.Query, org string) ([]doma
 	return nodes, nil
 }
 
-func (n nodeEtcdRepo) listNodes(keyPrefix string) ([]domain.Node, error) {
+func (n nodeEtcdRepo) listNodes(ctx context.Context, keyPrefix string) ([]domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.listNodes")
+	defer span.End()
 	nodes := make([]domain.Node, 0)
-	resp, err := n.etcd.Get(context.TODO(), keyPrefix, etcd.WithPrefix())
+	resp, err := n.etcd.Get(ctx, keyPrefix, etcd.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -135,56 +163,74 @@ func (n nodeEtcdRepo) listNodes(keyPrefix string) ([]domain.Node, error) {
 	return nodes, nil
 }
 
-func (n nodeEtcdRepo) PutLabel(node domain.Node, label domain.Label) (*domain.Node, error) {
-	err := n.putLabelGetModel(node, label)
+func (n nodeEtcdRepo) PutLabel(ctx context.Context, node domain.Node, label domain.Label) (*domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.PutLabel")
+	defer span.End()
+	err := n.putLabelGetModel(ctx, node, label)
 	if err != nil {
 		return nil, err
 	}
-	err = n.putLabelQueryModel(node, label)
+	err = n.putLabelQueryModel(ctx, node, label)
 	if err != nil {
 		return nil, err
 	}
-	return n.Get(node.Id, node.Org)
+	return n.Get(ctx, node.Id, node.Org)
 }
 
-func (n nodeEtcdRepo) DeleteLabel(node domain.Node, labelKey string) (*domain.Node, error) {
-	err := n.deleteLabelGetModel(node, labelKey)
+func (n nodeEtcdRepo) DeleteLabel(ctx context.Context, node domain.Node, labelKey string) (*domain.Node, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.DeleteLabel")
+	defer span.End()
+	err := n.deleteLabelGetModel(ctx, node, labelKey)
 	if err != nil {
 		return nil, err
 	}
-	err = n.deleteLabelQueryModel(node, labelKey)
+	err = n.deleteLabelQueryModel(ctx, node, labelKey)
 	if err != nil {
 		return nil, err
 	}
-	return n.Get(node.Id, node.Org)
+	return n.Get(ctx, node.Id, node.Org)
 }
 
-func (n nodeEtcdRepo) deleteNodeGetModel(node domain.Node) error {
+func (n nodeEtcdRepo) deleteNodeGetModel(ctx context.Context, node domain.Node) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.deleteNodeGetModel")
+	defer span.End()
 	key := getKey(node)
-	_, err := n.etcd.Delete(context.TODO(), key)
+	_, err := n.etcd.Delete(ctx, key)
 	return err
 }
 
-func (n nodeEtcdRepo) deleteNodeQueryModel(node domain.Node) (err error) {
+func (n nodeEtcdRepo) deleteNodeQueryModel(ctx context.Context, node domain.Node) (err error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.deleteNodeQueryModel")
+	defer span.End()
 	for _, label := range node.Labels {
 		key := queryKey(node, label.Key())
-		_, delErr := n.etcd.Delete(context.TODO(), key)
+		_, delErr := n.etcd.Delete(ctx, key)
 		err = errors.Join(err, delErr)
 	}
 	return err
 }
 
-func (n nodeEtcdRepo) putNodeGetModel(node domain.Node) error {
+func (n nodeEtcdRepo) putNodeGetModel(ctx context.Context, node domain.Node) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.putNodeGetModel")
+	defer span.End()
 	nodeMarshalled, err := n.nodeMarshaller.Marshal(node)
 	if err != nil {
 		return err
 	}
 	key := getKey(node)
-	_, err = n.etcd.Put(context.TODO(), key, string(nodeMarshalled))
+	_, err = n.etcd.Put(ctx, key, string(nodeMarshalled))
 	return err
 }
 
-func (n nodeEtcdRepo) putLabelGetModel(node domain.Node, label domain.Label) error {
+func (n nodeEtcdRepo) putLabelGetModel(ctx context.Context, node domain.Node, label domain.Label) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.putLabelGetModel")
+	defer span.End()
 	labelIndex := -1
 	for i, nodeLabel := range node.Labels {
 		if nodeLabel.Key() == label.Key() {
@@ -196,21 +242,27 @@ func (n nodeEtcdRepo) putLabelGetModel(node domain.Node, label domain.Label) err
 	} else {
 		node.Labels = append(node.Labels, label)
 	}
-	return n.putNodeGetModel(node)
+	return n.putNodeGetModel(ctx, node)
 }
 
-func (n nodeEtcdRepo) deleteLabelGetModel(node domain.Node, labelKey string) error {
+func (n nodeEtcdRepo) deleteLabelGetModel(ctx context.Context, node domain.Node, labelKey string) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.deleteLabelGetModel")
+	defer span.End()
 	labelIndex := findIndexByLabelKey(node, labelKey)
 	if labelIndex >= 0 {
 		node.Labels = slices.Delete(node.Labels, labelIndex, labelIndex+1)
-		return n.putNodeGetModel(node)
+		return n.putNodeGetModel(ctx, node)
 	}
 	return domain.ErrNotFound("label")
 }
 
-func (n nodeEtcdRepo) putNodeQueryModel(node domain.Node) error {
+func (n nodeEtcdRepo) putNodeQueryModel(ctx context.Context, node domain.Node) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.putNodeQueryModel")
+	defer span.End()
 	for _, label := range node.Labels {
-		err := n.putLabelQueryModel(node, label)
+		err := n.putLabelQueryModel(ctx, node, label)
 		if err != nil {
 			return err
 		}
@@ -218,26 +270,35 @@ func (n nodeEtcdRepo) putNodeQueryModel(node domain.Node) error {
 	return nil
 }
 
-func (n nodeEtcdRepo) putLabelQueryModel(node domain.Node, label domain.Label) error {
+func (n nodeEtcdRepo) putLabelQueryModel(ctx context.Context, node domain.Node, label domain.Label) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.putLabelQueryModel")
+	defer span.End()
 	labelMarshalled, err := n.labelMarshaller.Marshal(label)
 	if err != nil {
 		return err
 	}
 	key := queryKey(node, label.Key())
-	_, err = n.etcd.Put(context.TODO(), key, string(labelMarshalled))
+	_, err = n.etcd.Put(ctx, key, string(labelMarshalled))
 	return err
 }
 
-func (n nodeEtcdRepo) deleteLabelQueryModel(node domain.Node, labelKey string) error {
+func (n nodeEtcdRepo) deleteLabelQueryModel(ctx context.Context, node domain.Node, labelKey string) error {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.deleteLabelQueryModel")
+	defer span.End()
 	key := queryKey(node, labelKey)
-	_, err := n.etcd.Delete(context.TODO(), key)
+	_, err := n.etcd.Delete(ctx, key)
 	return err
 }
 
-func (n nodeEtcdRepo) queryNodes(query domain.Query, keyPrefix string) ([]domain.NodeId, error) {
+func (n nodeEtcdRepo) queryNodes(ctx context.Context, query domain.Query, keyPrefix string) ([]domain.NodeId, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.DeletqueryNodeseLabel")
+	defer span.End()
 	nodeIds := make([]domain.NodeId, 0)
 	for i, selector := range query {
-		currNodes, err := n.selectNodes(selector, keyPrefix)
+		currNodes, err := n.selectNodes(ctx, selector, keyPrefix)
 		if err != nil {
 			return nil, err
 		}
@@ -254,9 +315,12 @@ func (n nodeEtcdRepo) queryNodes(query domain.Query, keyPrefix string) ([]domain
 	return nodeIds, nil
 }
 
-func (n nodeEtcdRepo) selectNodes(selector domain.Selector, keyPrefix string) ([]domain.NodeId, error) {
+func (n nodeEtcdRepo) selectNodes(ctx context.Context, selector domain.Selector, keyPrefix string) ([]domain.NodeId, error) {
+	tracer := otel.Tracer("magnetar.NodeRepo")
+	ctx, span := tracer.Start(ctx, "NodeRepo.selectNodes")
+	defer span.End()
 	prefix := fmt.Sprintf("%s/%s/", keyPrefix, selector.LabelKey)
-	resp, err := n.etcd.Get(context.TODO(), prefix, etcd.WithPrefix())
+	resp, err := n.etcd.Get(ctx, prefix, etcd.WithPrefix())
 	if err != nil {
 		return nil, err
 	}

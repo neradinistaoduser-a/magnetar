@@ -21,6 +21,8 @@ import (
 	oortapi "github.com/c12s/oort/pkg/api"
 	natsgo "github.com/nats-io/nats.go"
 	etcd "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
@@ -60,6 +62,11 @@ func NewAppWithConfig(config *configs.Config) (*app, error) {
 }
 
 func (a *app) Start() error {
+	shutdownTracing := initTracing(
+		"magnetar",
+		a.config.JaegerGRPCEndpoint(),
+	)
+	a.shutdownProcesses = append(a.shutdownProcesses, shutdownTracing)
 	a.init()
 
 	err := a.startRegistrationServer()
@@ -145,7 +152,12 @@ func (a *app) initGrpcServer() {
 	if a.magnetarServer == nil {
 		log.Fatalln("magnetar server is nil")
 	}
-	s := grpc.NewServer(grpc.UnaryInterceptor(servers.GetAuthInterceptor()))
+
+	s := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.UnaryInterceptor(servers.GetAuthInterceptor()),
+	)
+
 	api.RegisterMagnetarServer(s, a.magnetarServer)
 	reflection.Register(s)
 	a.grpcServer = s
@@ -175,11 +187,19 @@ func (a *app) initRegistrationServer() {
 	if a.registrationSubscriber == nil {
 		log.Fatalln("registration req subscriber is nil")
 	}
-	server, err := servers.NewRegistrationAsyncServer(a.registrationSubscriber, a.publisher, *a.registrationService)
+
+	tracer := otel.Tracer("magnetar.AppInit")
+	_, span := tracer.Start(context.Background(), "InitRegistrationServer")
+	defer span.End()
+
+	server, err := servers.NewRegistrationAsyncServer(a.registrationSubscriber, a.publisher, a.registrationService)
 	if err != nil {
+		span.RecordError(err)
 		log.Fatalln(err)
 	}
+
 	a.registrationServer = server
+	log.Println("Registration async server initialized")
 }
 
 func (a *app) initRegistrationService() {
@@ -203,6 +223,7 @@ func (a *app) initNodeService() {
 	if a.gravity == nil {
 		log.Fatalln("gravity is nil")
 	}
+
 	nodeService, err := services.NewNodeService(a.nodeRepo, a.evaluatorClient, a.administratorClient, a.authzService, a.meridian, a.gravity)
 	if err != nil {
 		log.Fatalln(err)
@@ -226,7 +247,11 @@ func (a *app) initAuthZService() {
 }
 
 func (a *app) initMeridian() {
-	conn, err := grpc.NewClient(a.config.MeridianAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		a.config.MeridianAddress(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -234,8 +259,11 @@ func (a *app) initMeridian() {
 }
 
 func (a *app) initGravity() {
-	log.Println(a.config.GravityAddress())
-	conn, err := grpc.NewClient(a.config.GravityAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		a.config.GravityAddress(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
 	if err != nil {
 		log.Fatalln(err)
 	}

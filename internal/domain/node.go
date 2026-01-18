@@ -1,5 +1,7 @@
 package domain
 
+import "context"
+
 type Node struct {
 	Id          NodeId
 	Org         string
@@ -25,16 +27,16 @@ type Selector struct {
 }
 
 type NodeRepo interface {
-	Put(node Node) error
-	Get(nodeId NodeId, org string) (*Node, error)
-	Delete(node Node) error
-	ListNodePool() ([]Node, error)
-	ListOrgOwnedNodes(org string) ([]Node, error)
-	QueryNodePool(query Query) ([]Node, error)
-	QueryOrgOwnedNodes(query Query, org string) ([]Node, error)
-	PutLabel(node Node, label Label) (*Node, error)
-	DeleteLabel(node Node, labelKey string) (*Node, error)
-	ListAllNodes() ([]Node, error)
+	Put(ctx context.Context, node Node) error
+	Get(ctx context.Context, nodeId NodeId, org string) (*Node, error)
+	Delete(ctx context.Context, node Node) error
+	ListNodePool(ctx context.Context) ([]Node, error)
+	ListOrgOwnedNodes(ctx context.Context, org string) ([]Node, error)
+	ListAllNodes(ctx context.Context) ([]Node, error)
+	QueryNodePool(ctx context.Context, query Query) ([]Node, error)
+	QueryOrgOwnedNodes(ctx context.Context, query Query, org string) ([]Node, error)
+	PutLabel(ctx context.Context, node Node, label Label) (*Node, error)
+	DeleteLabel(ctx context.Context, node Node, labelKey string) (*Node, error)
 }
 
 type NodeMarshaller interface {

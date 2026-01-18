@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 	"fmt"
-	"github.com/golang-jwt/jwt/v5"
 	"log"
 	"strings"
+
+	"github.com/golang-jwt/jwt/v5"
+	"go.opentelemetry.io/otel"
 )
 
 type AuthZService struct {
@@ -17,6 +19,9 @@ func NewAuthZService(key string) AuthZService {
 }
 
 func (s AuthZService) Authorize(ctx context.Context, permName string, objKind string, objId string) bool {
+	tracer := otel.Tracer("magnetar.AuthorizeService")
+	ctx, span := tracer.Start(ctx, "Authorize")
+	defer span.End()
 	tokenString, ok := ctx.Value("authz-token").(string)
 	if !ok {
 		log.Println("no token provided")
