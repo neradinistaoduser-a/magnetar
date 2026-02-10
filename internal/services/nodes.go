@@ -106,7 +106,7 @@ func (n *NodeService) ClaimOwnership(ctx context.Context, req domain.ClaimOwners
 			span.RecordError(err)
 			continue
 		}
-		if err := n.administrator.SendRequest(&oortapi.CreateInheritanceRelReq{
+		if err := n.administrator.SendRequest(ctx, &oortapi.CreateInheritanceRelReq{
 			From: &oortapi.Resource{Id: req.Org, Kind: "org"},
 			To:   &oortapi.Resource{Id: node.Id.Value, Kind: "node"},
 		}, func(resp *oortapi.AdministrationAsyncResp) {
