@@ -1,6 +1,7 @@
 package api
 
 import (
+	context "context"
 	"fmt"
 	"log"
 
@@ -34,7 +35,7 @@ func NewRegistrationAsyncClient(natsAddress string) (*RegistrationAsyncClient, e
 	}, nil
 }
 
-func (n *RegistrationAsyncClient) Register(req *RegistrationReq, callback RegistrationCallback) error {
+func (n *RegistrationAsyncClient) Register(ctx context.Context, req *RegistrationReq, callback RegistrationCallback) error {
 	reqMarshalled, err := req.Marshal()
 	if err != nil {
 		return err
@@ -42,7 +43,7 @@ func (n *RegistrationAsyncClient) Register(req *RegistrationReq, callback Regist
 
 	replySubject := n.publisher.GenerateReplySubject()
 	subscriber := n.subscriberFactory(replySubject)
-	err = subscriber.Subscribe(func(msg []byte, _ string) {
+	err = subscriber.Subscribe(func(subCtx context.Context, msg []byte, _ string) {
 		resp := &RegistrationResp{}
 		err := resp.Unmarshal(msg)
 		if err != nil {
@@ -56,7 +57,7 @@ func (n *RegistrationAsyncClient) Register(req *RegistrationReq, callback Regist
 	}
 
 	// send request
-	err = n.publisher.Request(reqMarshalled, RegistrationSubject, replySubject)
+	err = n.publisher.Request(ctx, reqMarshalled, RegistrationSubject, replySubject)
 	if err != nil {
 		_ = subscriber.Unsubscribe()
 		return err

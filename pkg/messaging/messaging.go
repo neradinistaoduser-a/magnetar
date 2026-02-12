@@ -1,12 +1,14 @@
 package messaging
 
+import "context"
+
 type Subscriber interface {
-	Subscribe(handler func(msg []byte, replySubject string)) error
+	Subscribe(handler func(ctx context.Context, msg []byte, replySubject string)) error
 	Unsubscribe() error
 }
 
 type Publisher interface {
-	Publish(msg []byte, subject string) error
-	Request(msg []byte, subject, replySubject string) error
+	Publish(ctx context.Context, msg []byte, subject string) error
+	Request(ctx context.Context, msg []byte, subject, replySubject string) error
 	GenerateReplySubject() string
 }

@@ -29,8 +29,7 @@ func (n *RegistrationAsyncServer) Serve() error {
 	return n.subscriber.Subscribe(n.register)
 }
 
-func (n *RegistrationAsyncServer) register(msg []byte, replySubject string) {
-	ctx := context.Background()
+func (n *RegistrationAsyncServer) register(ctx context.Context, msg []byte, replySubject string) {
 	tracer := otel.Tracer("magnetar.RegistrationAsyncServer")
 	ctx, span := tracer.Start(ctx, "RegisterMessage")
 	defer span.End()
@@ -70,7 +69,7 @@ func (n *RegistrationAsyncServer) register(msg []byte, replySubject string) {
 		return
 	}
 
-	if err := n.publisher.Publish(respMarshalled, replySubject); err != nil {
+	if err := n.publisher.Publish(ctx, respMarshalled, replySubject); err != nil {
 		span.RecordError(err)
 		log.Println(err)
 	}
